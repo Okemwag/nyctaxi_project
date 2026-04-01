@@ -1,0 +1,49 @@
+version: 2
+
+sources:
+  - name: silver
+    schema: silver
+    tables:
+      - name: taxi_trips
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: {count: 36, period: hour}
+          error_after: {count: 72, period: hour}
+        columns:
+          - name: business_trip_key
+            tests: [not_null]
+          - name: source_year_month
+            tests: [not_null]
+          - name: pickup_datetime
+            tests: [not_null]
+
+  - name: raw
+    schema: raw
+    tables:
+      - name: taxi_zone_lookup
+        columns:
+          - name: location_id
+            tests: [not_null, unique]
+
+  - name: ops
+    schema: ops
+    tables:
+      - name: batch_runs
+        columns:
+          - name: batch_id
+            tests: [not_null, unique]
+
+models:
+  - name: stg_taxi_trips
+    columns:
+      - name: business_trip_key
+        tests: [not_null, unique]
+  - name: stg_taxi_zones
+    columns:
+      - name: location_id
+        tests: [not_null]
+  - name: stg_batch_runs
+    columns:
+      - name: batch_id
+        tests: [not_null, unique]
+

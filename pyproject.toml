@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nyctaxi-lakehouse"
+version = "0.1.0"
+description = "NYC Taxi lakehouse ingestion and transformation pipeline"
+requires-python = ">=3.11"
+dependencies = [
+  "boto3>=1.35.0",
+  "polars>=1.6.0",
+  "psycopg[binary]>=3.2.0",
+  "requests>=2.32.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+]
+
+[project.scripts]
+nyctaxi = "nyctaxi.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "ingest/src"}
+
+[tool.setuptools.packages.find]
+where = ["ingest/src"]
+

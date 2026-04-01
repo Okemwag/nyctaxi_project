@@ -1,0 +1,28 @@
+version: 2
+
+models:
+  - name: dim_vendor
+    columns:
+      - name: vendor_sk
+        tests: [not_null, unique]
+  - name: dim_zone
+    columns:
+      - name: zone_sk
+        tests: [not_null, unique]
+  - name: fct_taxi_trips
+    columns:
+      - name: business_trip_key
+        tests: [not_null]
+      - name: source_year_month
+        tests: [not_null]
+  - name: fct_monthly_metrics
+    columns:
+      - name: taxi_type
+        tests: [not_null]
+      - name: trip_month
+        tests: [not_null]
+  - name: ops_monthly_source_reconciliation
+    columns:
+      - name: source_variance
+        tests: [not_null]
+

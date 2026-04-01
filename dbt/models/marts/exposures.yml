@@ -1,0 +1,52 @@
+version: 2
+
+exposures:
+  - name: trip_volume_and_revenue_dashboard
+    label: Trip Volume and Revenue Dashboard
+    type: dashboard
+    maturity: medium
+    url: http://localhost:3000
+    description: Monthly trip counts, revenue, and flagged-trip trends by taxi type.
+    depends_on:
+      - ref('fct_monthly_metrics')
+    owner:
+      name: Data Engineering
+      email: admin@example.com
+
+  - name: fare_anomalies_dashboard
+    label: Fare Anomalies Dashboard
+    type: dashboard
+    maturity: medium
+    url: http://localhost:3000
+    description: Investigates negative fares, impossible distances, temporal anomalies, and fare-rate outliers.
+    depends_on:
+      - ref('fct_fare_anomalies')
+    owner:
+      name: Data Engineering
+      email: admin@example.com
+
+  - name: peak_pickup_zones_dashboard
+    label: Peak Pickup Zones Dashboard
+    type: dashboard
+    maturity: medium
+    url: http://localhost:3000
+    description: Tracks hourly trip volume and revenue by pickup zone.
+    depends_on:
+      - ref('fct_zone_hourly_metrics')
+    owner:
+      name: Data Engineering
+      email: admin@example.com
+
+  - name: pipeline_monitoring_dashboard
+    label: Pipeline Monitoring Dashboard
+    type: dashboard
+    maturity: high
+    url: http://localhost:3000
+    description: Operational pipeline health covering success rate, duplicate rate, runtime, and freshness lag.
+    depends_on:
+      - ref('ops_pipeline_monitoring')
+      - ref('ops_monthly_source_reconciliation')
+    owner:
+      name: Data Engineering
+      email: admin@example.com
+

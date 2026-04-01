@@ -1,0 +1,20 @@
+name: nyctaxi
+version: 1.0.0
+config-version: 2
+profile: nyctaxi
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+target-path: "/tmp/dbt_target"
+log-path: "/tmp/dbt_logs"
+
+models:
+  nyctaxi:
+    staging:
+      +schema: staging
+      +materialized: view
+    marts:
+      +schema: gold
+      +materialized: table
