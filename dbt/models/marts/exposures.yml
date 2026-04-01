@@ -46,7 +46,7 @@ exposures:
     depends_on:
       - ref('ops_pipeline_monitoring')
       - ref('ops_monthly_source_reconciliation')
+      - ref('ops_alerts')
     owner:
       name: Data Engineering
       email: admin@example.com
-

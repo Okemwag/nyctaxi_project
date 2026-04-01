@@ -4,7 +4,9 @@ import os
 import subprocess
 from datetime import timedelta
 
+import psycopg
 from airflow.decorators import dag, task
+from airflow.exceptions import AirflowException
 from airflow.models.param import Param
 from airflow.operators.python import get_current_context
 from pendulum import datetime
@@ -82,14 +84,37 @@ def nyc_taxi_lakehouse():
     def dbt_test() -> None:
         _run_dbt_command(["test"])
 
+    @task(execution_timeout=timedelta(minutes=10))
+    def check_alerts() -> None:
+        settings = Settings.from_env()
+        with psycopg.connect(settings.warehouse_dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select severity, taxi_type, coalesce(year_month, ''), alert_code, alert_context
+                    from gold.ops_alerts
+                    order by severity desc, taxi_type, year_month nulls first, alert_code
+                    """
+                )
+                alerts = cur.fetchall()
+
+        error_alerts = [row for row in alerts if row[0] == "error"]
+        if error_alerts:
+            formatted = "; ".join(
+                f"{severity}:{taxi_type}:{year_month}:{alert_code}:{alert_context}"
+                for severity, taxi_type, year_month, alert_code, alert_context in error_alerts
+            )
+            raise AirflowException(f"Operational alert threshold breached: {formatted}")
+
     payloads = resolve_payloads()
     boot = bootstrap()
     loaded = ingest_month.expand(payload=payloads)
     freshness = dbt_source_freshness()
     built = dbt_run()
     tested = dbt_test()
+    alerted = check_alerts()
 
-    boot >> loaded >> freshness >> built >> tested
+    boot >> loaded >> freshness >> built >> tested >> alerted
 
 
 nyc_taxi_lakehouse()

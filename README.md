@@ -64,6 +64,10 @@ Operational metadata lands in `ops.batch_runs`, which tracks source row counts, 
    docker compose exec dbt dbt test --project-dir /opt/project/dbt --profiles-dir /opt/project/dbt
    ```
 
+6. Operate backfills through Airflow once the stack is live.
+
+   Examples are in [airflow/OPERATIONS.md](/home/okemwag/DataProjects/nyxtaxi/airflow/OPERATIONS.md).
+
 ## Airflow
 
 - UI: `http://localhost:8080`
@@ -90,6 +94,7 @@ The DAG bootstraps warehouse schemas, refreshes the taxi zone lookup, ingests on
 - UI: `http://localhost:3000`
 - Starter SQL questions are in [metabase/dashboard_queries.sql](/home/okemwag/DataProjects/nyxtaxi/metabase/dashboard_queries.sql)
 - Setup steps are in [metabase/SETUP.md](/home/okemwag/DataProjects/nyxtaxi/metabase/SETUP.md)
+- Dashboard layout guidance is in [metabase/DASHBOARDS.md](/home/okemwag/DataProjects/nyxtaxi/metabase/DASHBOARDS.md)
 
 Recommended dashboards:
 
@@ -119,6 +124,12 @@ The dbt gold layer exposes:
 - average pipeline runtime
 - freshness lag
 - trip count by month vs source totals
+
+## Performance
+
+- Silver loads now upsert in configurable chunks.
+- Set `NYCTAXI_LOAD_CHUNK_SIZE` to tune copy/upsert batch size for larger backfills.
+- Default chunk size is `250000` rows.
 
 ## Data Quality Checks
 

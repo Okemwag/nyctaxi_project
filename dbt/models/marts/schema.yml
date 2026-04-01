@@ -32,3 +32,12 @@ models:
         tests: [not_null]
       - name: loaded_variance
         tests: [not_null]
+  - name: ops_alerts
+    columns:
+      - name: severity
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["warn", "error"]
+      - name: alert_code
+        tests: [not_null]

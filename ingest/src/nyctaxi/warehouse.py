@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import math
+import os
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any
@@ -10,6 +12,8 @@ import psycopg
 from psycopg import sql
 
 from nyctaxi.models import BUSINESS_KEY_COLUMNS, FINGERPRINT_COLUMNS
+
+logger = logging.getLogger(__name__)
 
 
 WAREHOUSE_DDL = """
@@ -347,6 +351,16 @@ def load_trip_batch(
     year_month = batch_df["source_year_month"][0]
     create_month_partition(dsn, year_month)
     prepared_df, metrics = _prepare_batch_dataframe(batch_df, schema_drift_columns)
+    chunk_size = _load_chunk_size()
+    total_chunks = max(1, math.ceil(prepared_df.height / chunk_size))
+
+    logger.info(
+        "Loading %s prepared rows for %s in %s chunk(s) of up to %s rows",
+        prepared_df.height,
+        year_month,
+        total_chunks,
+        chunk_size,
+    )
 
     with psycopg.connect(dsn) as conn:
         with conn.cursor() as cur:
@@ -388,130 +402,28 @@ def load_trip_batch(
                     has_null_key BOOLEAN,
                     has_schema_drift BOOLEAN,
                     quality_status TEXT
-                ) ON COMMIT DROP
-                """
-            )
-            _copy_rows(
-                cur,
-                "stage_trip_batch",
-                FINAL_STAGE_COLUMNS,
-                prepared_df.select(FINAL_STAGE_COLUMNS).iter_rows(),
-            )
-            cur.execute(
-                """
-                INSERT INTO silver.taxi_trips (
-                    business_trip_key,
-                    source_year_month,
-                    row_fingerprint,
-                    batch_id,
-                    taxi_type,
-                    source_file_name,
-                    vendor_id,
-                    pickup_datetime,
-                    dropoff_datetime,
-                    passenger_count,
-                    trip_distance,
-                    rate_code_id,
-                    store_and_fwd_flag,
-                    pickup_location_id,
-                    dropoff_location_id,
-                    payment_type,
-                    fare_amount,
-                    extra,
-                    mta_tax,
-                    tip_amount,
-                    tolls_amount,
-                    improvement_surcharge,
-                    total_amount,
-                    congestion_surcharge,
-                    airport_fee,
-                    trip_type,
-                    ehail_fee,
-                    has_negative_fare,
-                    has_invalid_distance,
-                    has_temporal_anomaly,
-                    has_invalid_zone,
-                    has_null_key,
-                    has_schema_drift,
-                    quality_status,
-                    loaded_at,
-                    updated_at
                 )
-                SELECT
-                    business_trip_key,
-                    source_year_month,
-                    row_fingerprint,
-                    batch_id,
-                    taxi_type,
-                    source_file_name,
-                    vendor_id,
-                    pickup_datetime,
-                    dropoff_datetime,
-                    passenger_count,
-                    trip_distance,
-                    rate_code_id,
-                    store_and_fwd_flag,
-                    pickup_location_id,
-                    dropoff_location_id,
-                    payment_type,
-                    fare_amount,
-                    extra,
-                    mta_tax,
-                    tip_amount,
-                    tolls_amount,
-                    improvement_surcharge,
-                    total_amount,
-                    congestion_surcharge,
-                    airport_fee,
-                    trip_type,
-                    ehail_fee,
-                    has_negative_fare,
-                    has_invalid_distance,
-                    has_temporal_anomaly,
-                    has_invalid_zone,
-                    has_null_key,
-                    has_schema_drift,
-                    quality_status,
-                    NOW(),
-                    NOW()
-                FROM stage_trip_batch
-                ON CONFLICT (business_trip_key, source_year_month) DO UPDATE
-                SET row_fingerprint = EXCLUDED.row_fingerprint,
-                    batch_id = EXCLUDED.batch_id,
-                    taxi_type = EXCLUDED.taxi_type,
-                    source_file_name = EXCLUDED.source_file_name,
-                    vendor_id = EXCLUDED.vendor_id,
-                    pickup_datetime = EXCLUDED.pickup_datetime,
-                    dropoff_datetime = EXCLUDED.dropoff_datetime,
-                    passenger_count = EXCLUDED.passenger_count,
-                    trip_distance = EXCLUDED.trip_distance,
-                    rate_code_id = EXCLUDED.rate_code_id,
-                    store_and_fwd_flag = EXCLUDED.store_and_fwd_flag,
-                    pickup_location_id = EXCLUDED.pickup_location_id,
-                    dropoff_location_id = EXCLUDED.dropoff_location_id,
-                    payment_type = EXCLUDED.payment_type,
-                    fare_amount = EXCLUDED.fare_amount,
-                    extra = EXCLUDED.extra,
-                    mta_tax = EXCLUDED.mta_tax,
-                    tip_amount = EXCLUDED.tip_amount,
-                    tolls_amount = EXCLUDED.tolls_amount,
-                    improvement_surcharge = EXCLUDED.improvement_surcharge,
-                    total_amount = EXCLUDED.total_amount,
-                    congestion_surcharge = EXCLUDED.congestion_surcharge,
-                    airport_fee = EXCLUDED.airport_fee,
-                    trip_type = EXCLUDED.trip_type,
-                    ehail_fee = EXCLUDED.ehail_fee,
-                    has_negative_fare = EXCLUDED.has_negative_fare,
-                    has_invalid_distance = EXCLUDED.has_invalid_distance,
-                    has_temporal_anomaly = EXCLUDED.has_temporal_anomaly,
-                    has_invalid_zone = EXCLUDED.has_invalid_zone,
-                    has_null_key = EXCLUDED.has_null_key,
-                    has_schema_drift = EXCLUDED.has_schema_drift,
-                    quality_status = EXCLUDED.quality_status,
-                    updated_at = NOW()
                 """
             )
-        conn.commit()
+            for chunk_number, chunk_df in enumerate(prepared_df.iter_slices(n_rows=chunk_size), start=1):
+                cur.execute("TRUNCATE stage_trip_batch")
+                _copy_rows(
+                    cur,
+                    "stage_trip_batch",
+                    FINAL_STAGE_COLUMNS,
+                    chunk_df.select(FINAL_STAGE_COLUMNS).iter_rows(),
+                )
+                cur.execute(_trip_upsert_sql())
+                conn.commit()
+                logger.info(
+                    "Loaded chunk %s/%s for %s (%s rows, cumulative %s/%s)",
+                    chunk_number,
+                    total_chunks,
+                    year_month,
+                    chunk_df.height,
+                    min(chunk_number * chunk_size, prepared_df.height),
+                    prepared_df.height,
+                )
 
     return metrics
 
@@ -614,3 +526,129 @@ def _normalize_scalar(value: Any) -> Any:
     if isinstance(value, datetime) and value.tzinfo is not None:
         return value.astimezone(timezone.utc).replace(tzinfo=None)
     return value
+
+
+def _load_chunk_size() -> int:
+    raw_value = os.getenv("NYCTAXI_LOAD_CHUNK_SIZE", "250000")
+    try:
+        chunk_size = int(raw_value)
+    except ValueError as exc:
+        raise ValueError("NYCTAXI_LOAD_CHUNK_SIZE must be an integer") from exc
+    if chunk_size <= 0:
+        raise ValueError("NYCTAXI_LOAD_CHUNK_SIZE must be greater than zero")
+    return chunk_size
+
+
+def _trip_upsert_sql() -> str:
+    return """
+        INSERT INTO silver.taxi_trips (
+            business_trip_key,
+            source_year_month,
+            row_fingerprint,
+            batch_id,
+            taxi_type,
+            source_file_name,
+            vendor_id,
+            pickup_datetime,
+            dropoff_datetime,
+            passenger_count,
+            trip_distance,
+            rate_code_id,
+            store_and_fwd_flag,
+            pickup_location_id,
+            dropoff_location_id,
+            payment_type,
+            fare_amount,
+            extra,
+            mta_tax,
+            tip_amount,
+            tolls_amount,
+            improvement_surcharge,
+            total_amount,
+            congestion_surcharge,
+            airport_fee,
+            trip_type,
+            ehail_fee,
+            has_negative_fare,
+            has_invalid_distance,
+            has_temporal_anomaly,
+            has_invalid_zone,
+            has_null_key,
+            has_schema_drift,
+            quality_status,
+            loaded_at,
+            updated_at
+        )
+        SELECT
+            business_trip_key,
+            source_year_month,
+            row_fingerprint,
+            batch_id,
+            taxi_type,
+            source_file_name,
+            vendor_id,
+            pickup_datetime,
+            dropoff_datetime,
+            passenger_count,
+            trip_distance,
+            rate_code_id,
+            store_and_fwd_flag,
+            pickup_location_id,
+            dropoff_location_id,
+            payment_type,
+            fare_amount,
+            extra,
+            mta_tax,
+            tip_amount,
+            tolls_amount,
+            improvement_surcharge,
+            total_amount,
+            congestion_surcharge,
+            airport_fee,
+            trip_type,
+            ehail_fee,
+            has_negative_fare,
+            has_invalid_distance,
+            has_temporal_anomaly,
+            has_invalid_zone,
+            has_null_key,
+            has_schema_drift,
+            quality_status,
+            NOW(),
+            NOW()
+        FROM stage_trip_batch
+        ON CONFLICT (business_trip_key, source_year_month) DO UPDATE
+        SET row_fingerprint = EXCLUDED.row_fingerprint,
+            batch_id = EXCLUDED.batch_id,
+            taxi_type = EXCLUDED.taxi_type,
+            source_file_name = EXCLUDED.source_file_name,
+            vendor_id = EXCLUDED.vendor_id,
+            pickup_datetime = EXCLUDED.pickup_datetime,
+            dropoff_datetime = EXCLUDED.dropoff_datetime,
+            passenger_count = EXCLUDED.passenger_count,
+            trip_distance = EXCLUDED.trip_distance,
+            rate_code_id = EXCLUDED.rate_code_id,
+            store_and_fwd_flag = EXCLUDED.store_and_fwd_flag,
+            pickup_location_id = EXCLUDED.pickup_location_id,
+            dropoff_location_id = EXCLUDED.dropoff_location_id,
+            payment_type = EXCLUDED.payment_type,
+            fare_amount = EXCLUDED.fare_amount,
+            extra = EXCLUDED.extra,
+            mta_tax = EXCLUDED.mta_tax,
+            tip_amount = EXCLUDED.tip_amount,
+            tolls_amount = EXCLUDED.tolls_amount,
+            improvement_surcharge = EXCLUDED.improvement_surcharge,
+            total_amount = EXCLUDED.total_amount,
+            congestion_surcharge = EXCLUDED.congestion_surcharge,
+            airport_fee = EXCLUDED.airport_fee,
+            trip_type = EXCLUDED.trip_type,
+            ehail_fee = EXCLUDED.ehail_fee,
+            has_negative_fare = EXCLUDED.has_negative_fare,
+            has_invalid_distance = EXCLUDED.has_invalid_distance,
+            has_temporal_anomaly = EXCLUDED.has_temporal_anomaly,
+            has_invalid_zone = EXCLUDED.has_invalid_zone,
+            has_null_key = EXCLUDED.has_null_key,
+            has_schema_drift = EXCLUDED.has_schema_drift,
+            quality_status = EXCLUDED.quality_status,
+            updated_at = NOW()
+    """

@@ -45,6 +45,17 @@ select
   freshness_lag_hours
 from gold.ops_pipeline_monitoring;
 
+-- Active alerts
+select
+  evaluated_at,
+  severity,
+  taxi_type,
+  year_month,
+  alert_code,
+  alert_context
+from gold.ops_alerts
+order by evaluated_at desc, severity desc, taxi_type, year_month;
+
 -- Source totals vs warehouse totals
 select
   year_month,
