@@ -50,8 +50,10 @@ select
   year_month,
   taxi_type,
   source_rows,
+  expected_loaded_rows,
+  duplicate_rows,
   warehouse_rows,
-  source_variance
+  source_variance,
+  loaded_variance
 from gold.ops_monthly_source_reconciliation
 order by year_month desc, taxi_type;
-

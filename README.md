@@ -51,7 +51,13 @@ Operational metadata lands in `ops.batch_runs`, which tracks source row counts, 
    docker compose run --rm airflow-webserver python -m nyctaxi.cli run-month --taxi-type yellow --year-month 2024-01
    ```
 
-4. Build marts and tests.
+4. Run a historical backfill when needed.
+
+   ```bash
+   docker compose run --rm airflow-webserver python -m nyctaxi.cli run-range --taxi-type yellow --start-month 2024-01 --end-month 2024-06
+   ```
+
+5. Build marts and tests.
 
    ```bash
    docker compose exec dbt dbt run --project-dir /opt/project/dbt --profiles-dir /opt/project/dbt
@@ -64,9 +70,13 @@ Operational metadata lands in `ops.batch_runs`, which tracks source row counts, 
 - Default credentials: `admin / admin`
 - DAG: `nyc_taxi_lakehouse`
 - Schedule: monthly on day 2 at 06:00 UTC
-- Runtime parameter override: `year_month=YYYY-MM`, `taxi_type=yellow|green`
+- Runtime parameter override:
+  `year_month=YYYY-MM`
+  `start_month=YYYY-MM`
+  `end_month=YYYY-MM`
+  `taxi_type=yellow|green`
 
-The DAG bootstraps warehouse schemas, refreshes the taxi zone lookup, ingests the requested month, and runs `dbt run` plus `dbt test`.
+The DAG bootstraps warehouse schemas, refreshes the taxi zone lookup, ingests one month or an inclusive month range, runs `dbt source freshness`, `dbt run`, and `dbt test`, and includes retries plus execution timeouts for operational use.
 
 ## MinIO
 
@@ -109,3 +119,12 @@ The dbt gold layer exposes:
 - average pipeline runtime
 - freshness lag
 - trip count by month vs source totals
+
+## Data Quality Checks
+
+dbt tests now cover:
+
+- accepted values for pipeline batch status and trip quality status
+- batch accounting: `source_rows = loaded_rows + duplicate_rows` for successful runs
+- unique fact grain on `(business_trip_key, source_year_month)`
+- reconciliation of latest successful batch counts to the warehouse snapshot

@@ -41,6 +41,63 @@ class NormalizedBatch:
     source_file_name: str
 
 
+def month_range(start_month: str, end_month: str) -> list[str]:
+    start = _parse_year_month(start_month)
+    end = _parse_year_month(end_month)
+    if start > end:
+        raise ValueError("start_month must be less than or equal to end_month")
+
+    months: list[str] = []
+    current = start
+    while current <= end:
+        months.append(current.strftime("%Y-%m"))
+        year = current.year + (1 if current.month == 12 else 0)
+        month = 1 if current.month == 12 else current.month + 1
+        current = current.replace(year=year, month=month)
+    return months
+
+
+def run_month_range(
+    settings: Settings,
+    taxi_type: str,
+    start_month: str,
+    end_month: str,
+    continue_on_error: bool = False,
+) -> dict[str, object]:
+    results: list[dict[str, object]] = []
+    failures: list[dict[str, str]] = []
+
+    for year_month in month_range(start_month, end_month):
+        try:
+            results.append(
+                run_month_pipeline(
+                    settings=settings,
+                    taxi_type=taxi_type,
+                    year_month=year_month,
+                )
+            )
+        except Exception as exc:
+            failure = {"year_month": year_month, "error": str(exc)}
+            failures.append(failure)
+            if not continue_on_error:
+                raise
+
+    return {
+        "status": "partial_success" if failures else "success",
+        "taxi_type": taxi_type,
+        "start_month": start_month,
+        "end_month": end_month,
+        "requested_months": month_range(start_month, end_month),
+        "successful_months": [
+            result["year_month"]
+            for result in results
+            if result.get("status") in {"success", "skipped"}
+        ],
+        "failed_months": failures,
+        "results": results,
+    }
+
+
 def bootstrap(settings: Settings) -> None:
     ensure_warehouse(settings.warehouse_dsn)
     sync_zone_lookup(settings)
@@ -254,3 +311,10 @@ def _parse_http_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
     return parsedate_to_datetime(value)
+
+
+def _parse_year_month(value: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m")
+    except ValueError as exc:
+        raise ValueError(f"invalid year_month '{value}', expected YYYY-MM") from exc

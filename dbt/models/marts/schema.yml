@@ -15,6 +15,11 @@ models:
         tests: [not_null]
       - name: source_year_month
         tests: [not_null]
+      - name: quality_status
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["valid", "flagged"]
   - name: fct_monthly_metrics
     columns:
       - name: taxi_type
@@ -25,4 +30,5 @@ models:
     columns:
       - name: source_variance
         tests: [not_null]
-
+      - name: loaded_variance
+        tests: [not_null]

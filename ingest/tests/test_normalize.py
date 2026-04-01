@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from nyctaxi.pipeline import normalize_trip_file
+from nyctaxi.pipeline import month_range, normalize_trip_file
 
 
 def test_normalize_trip_file_maps_aliases_and_tracks_schema_drift(tmp_path) -> None:
@@ -36,3 +36,6 @@ def test_normalize_trip_file_maps_aliases_and_tracks_schema_drift(tmp_path) -> N
     assert normalized.dataframe["pickup_location_id"].to_list() == [100]
     assert normalized.dataframe["source_year_month"].to_list() == ["2024-01"]
 
+
+def test_month_range_is_inclusive() -> None:
+    assert month_range("2024-01", "2024-03") == ["2024-01", "2024-02", "2024-03"]

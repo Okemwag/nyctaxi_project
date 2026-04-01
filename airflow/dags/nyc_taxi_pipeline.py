@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import subprocess
+from datetime import timedelta
 
 from airflow.decorators import dag, task
 from airflow.models.param import Param
@@ -8,7 +10,7 @@ from airflow.operators.python import get_current_context
 from pendulum import datetime
 
 from nyctaxi.config import Settings
-from nyctaxi.pipeline import run_month_pipeline, sync_zone_lookup
+from nyctaxi.pipeline import month_range, run_month_pipeline, sync_zone_lookup
 from nyctaxi.warehouse import ensure_warehouse
 
 
@@ -17,30 +19,49 @@ from nyctaxi.warehouse import ensure_warehouse
     start_date=datetime(2024, 1, 2, tz="UTC"),
     schedule="0 6 2 * *",
     catchup=False,
+    max_active_runs=1,
+    dagrun_timeout=timedelta(hours=8),
+    default_args={
+        "retries": 2,
+        "retry_delay": timedelta(minutes=10),
+    },
     params={
         "year_month": Param("", type=["null", "string"]),
+        "start_month": Param("", type=["null", "string"]),
+        "end_month": Param("", type=["null", "string"]),
         "taxi_type": Param("yellow", enum=["yellow", "green"]),
     },
     tags=["lakehouse", "nyc-taxi"],
 )
 def nyc_taxi_lakehouse():
     @task
-    def resolve_params() -> dict[str, str]:
+    def resolve_payloads() -> list[dict[str, str]]:
         context = get_current_context()
-        configured_month = context["params"].get("year_month")
-        year_month = configured_month or context["data_interval_start"].strftime("%Y-%m")
-        return {
-            "year_month": year_month,
-            "taxi_type": context["params"].get("taxi_type", "yellow"),
-        }
+        params = context["params"]
+        taxi_type = params.get("taxi_type", "yellow")
+        configured_month = _empty_to_none(params.get("year_month"))
+        start_month = _empty_to_none(params.get("start_month"))
+        end_month = _empty_to_none(params.get("end_month"))
 
-    @task
+        if configured_month and (start_month or end_month):
+            raise ValueError("Provide either year_month or a start_month/end_month range, not both")
+
+        if start_month or end_month:
+            if not start_month or not end_month:
+                raise ValueError("Both start_month and end_month are required for backfills")
+            months = month_range(start_month, end_month)
+        else:
+            months = [configured_month or context["data_interval_start"].strftime("%Y-%m")]
+
+        return [{"year_month": year_month, "taxi_type": taxi_type} for year_month in months]
+
+    @task(execution_timeout=timedelta(minutes=30))
     def bootstrap() -> None:
         settings = Settings.from_env()
         ensure_warehouse(settings.warehouse_dsn)
         sync_zone_lookup(settings)
 
-    @task
+    @task(execution_timeout=timedelta(hours=2))
     def ingest_month(payload: dict[str, str]) -> dict[str, object]:
         settings = Settings.from_env()
         return run_month_pipeline(
@@ -49,36 +70,49 @@ def nyc_taxi_lakehouse():
             year_month=payload["year_month"],
         )
 
-    @task
-    def build_dbt() -> None:
-        commands = [
-            [
-                "dbt",
-                "run",
-                "--project-dir",
-                "/opt/project/dbt",
-                "--profiles-dir",
-                "/opt/project/dbt",
-            ],
-            [
-                "dbt",
-                "test",
-                "--project-dir",
-                "/opt/project/dbt",
-                "--profiles-dir",
-                "/opt/project/dbt",
-            ],
-        ]
-        for command in commands:
-            subprocess.run(command, check=True)
+    @task(execution_timeout=timedelta(minutes=30))
+    def dbt_source_freshness() -> None:
+        _run_dbt_command(["source", "freshness"])
 
-    params = resolve_params()
+    @task(execution_timeout=timedelta(hours=2))
+    def dbt_run() -> None:
+        _run_dbt_command(["run"])
+
+    @task(execution_timeout=timedelta(hours=1))
+    def dbt_test() -> None:
+        _run_dbt_command(["test"])
+
+    payloads = resolve_payloads()
     boot = bootstrap()
-    loaded = ingest_month(params)
-    built = build_dbt()
+    loaded = ingest_month.expand(payload=payloads)
+    freshness = dbt_source_freshness()
+    built = dbt_run()
+    tested = dbt_test()
 
-    boot >> loaded >> built
+    boot >> loaded >> freshness >> built >> tested
 
 
 nyc_taxi_lakehouse()
 
+
+def _empty_to_none(value: str | None) -> str | None:
+    if not value:
+        return None
+    return value
+
+
+def _run_dbt_command(arguments: list[str]) -> None:
+    command = [
+        "dbt",
+        *arguments,
+        "--project-dir",
+        "/opt/project/dbt",
+        "--profiles-dir",
+        "/opt/project/dbt",
+    ]
+    env = {
+        **os.environ,
+        "DBT_TARGET_PATH": os.getenv("DBT_TARGET_PATH", "/tmp/dbt_target"),
+        "DBT_LOG_PATH": os.getenv("DBT_LOG_PATH", "/tmp/dbt_logs"),
+    }
+    subprocess.run(command, check=True, env=env)

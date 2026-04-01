@@ -88,6 +88,8 @@ services:
       AIRFLOW_ADMIN_FIRSTNAME: ${AIRFLOW_ADMIN_FIRSTNAME:-Data}
       AIRFLOW_ADMIN_LASTNAME: ${AIRFLOW_ADMIN_LASTNAME:-Engineer}
       AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL:-admin@example.com}
+      DBT_TARGET_PATH: /tmp/dbt_target
+      DBT_LOG_PATH: /tmp/dbt_logs
     volumes:
       - .:/opt/project
       - airflow-logs:/opt/airflow/logs
@@ -176,4 +178,3 @@ volumes:
   minio-data:
   airflow-logs:
   metabase-data:
-

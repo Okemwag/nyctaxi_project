@@ -38,6 +38,11 @@ models:
     columns:
       - name: business_trip_key
         tests: [not_null, unique]
+      - name: quality_status
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["valid", "flagged"]
   - name: stg_taxi_zones
     columns:
       - name: location_id
@@ -46,4 +51,8 @@ models:
     columns:
       - name: batch_id
         tests: [not_null, unique]
-
+      - name: status
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["running", "success", "failed"]

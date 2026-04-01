@@ -7,8 +7,6 @@ model-paths: ["models"]
 macro-paths: ["macros"]
 seed-paths: ["seeds"]
 test-paths: ["tests"]
-target-path: "/tmp/dbt_target"
-log-path: "/tmp/dbt_logs"
 
 models:
   nyctaxi:
